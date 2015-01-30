@@ -2,8 +2,9 @@ from Queue import PriorityQueue
 from threading import Thread
 from time import sleep
 import datetime
+import json
 
-from flask import Flask, jsonify, request
+from flask import Flask, request
 from flask_sockets import Sockets
 
 import chainclient
@@ -43,7 +44,18 @@ class Event:
         return '<event time=%s value=%s>' % (str(self.time), self.value)
 
     def to_dict(self):
-        return '%s: %s @ %s' %(self.sensor.metric, self.time, self.value)
+        return {
+            'timestamp': str(self.time),
+            '_links': {
+                'self': {
+                    'href': 'http://chain-api.media.mit.edu/scalar_data/'
+                },
+                'ch:sensor': {
+                    'href': self.sensor.url
+                }
+            },
+            'value': self.value
+        }
 
 def get_data(sensor, start_time, end_time):
     start_stamp = to_unix_time(start_time)
@@ -62,12 +74,12 @@ logger.info("Initialized!!!")
 @sockets.route('/')
 def send_socket(ws):
     # arguments
-    unix_start_time = 1420054989
+    unix_start_time = 1401926400
 
     # parameters
-    TIME_SCALE = 100
-    LOOK_AHEAD_TIME = datetime.timedelta(seconds=1800)
-    CHUNK_LENGTH = datetime.timedelta(seconds=3600)
+    TIME_SCALE = 10
+    LOOK_AHEAD_TIME = datetime.timedelta(seconds=1000)
+    CHUNK_LENGTH = datetime.timedelta(seconds=2000)
 
     # initial conditions
     LOCAL_START_TIME = now()
@@ -88,6 +100,7 @@ def send_socket(ws):
             if pseudo_current_time() >= now():
                 break
             if pseudo_current_time() < highest_time_checked - LOOK_AHEAD_TIME:
+                sleep(0.1)
                 continue
             start = highest_time_checked
             end = highest_time_checked + CHUNK_LENGTH
@@ -110,6 +123,6 @@ def send_socket(ws):
             q.put((key, event))
             sleep(0.1)
         else:
-            logger.info(event.to_dict())
-            # ws.send(jsonify(event.to_dict()))
+            logger.info('Sending: %s' % json.dumps(event.to_dict()))
+            ws.send(json.dumps(event.to_dict()))
             q.task_done()

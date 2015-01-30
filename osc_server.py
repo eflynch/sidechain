@@ -28,7 +28,10 @@ def main():
     metric_hash, device_hash, sensor_hash = get_models(site)
 
     def get_values_loop():
-        stream_url = site.links['ch:websocketStream'].href
+        if True:
+            stream_url = 'ws://localhost:8000/'
+        else:
+            stream_url = site.links['ch:websocketStream'].href
         logger.info('Connecting to %s' % stream_url)
         ws = create_connection(stream_url)
         logger.info('Connected!')
@@ -42,7 +45,7 @@ def main():
                 logger.warning('Hash miss: %s' % in_data.links['ch:sensor'].href)
                 continue
 
-            logger.debug('Received value of %f from sensor %s' % (in_data.value, sensor))
+            logger.info('Received value of %f from sensor %s' % (in_data.value, sensor))
             sensor.value = in_data.value
             osc_addr = liblo.Address(OSC_OUT_PORT)
             liblo.send(osc_addr, '/device/data', sensor.device.index, sensor.metric, in_data.value)
