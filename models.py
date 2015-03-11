@@ -7,7 +7,7 @@ def get_models(site):
     device_hash = {}
     sensor_hash = {}
     sensors_by_metric = {}
-    for index, device_doc in enumerate(site.rels['ch:devices'].rels['items']):
+    for index, device_doc in enumerate(site.rels['ch:siteSummary'].devices):
         if 'geoLocation' in device_doc:
             latitude = device_doc['geoLocation']['latitude']
             longitude = device_doc['geoLocation']['longitude']
@@ -17,8 +17,8 @@ def get_models(site):
 
         device = Device(latitude, longitude, elevation, index)
         device_hash[index] = device
-        for chain_sensor in device_doc.rels['ch:sensors'].rels['items']:
-            url = chain_sensor.links.self.href
+        for chain_sensor in device_doc.sensors:
+            url = chain_sensor.href
             sensor = Sensor(url=url,
                             metric=chain_sensor.metric,
                             device=device)

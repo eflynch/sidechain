@@ -1,4 +1,4 @@
-from Queue import PriorityQueue
+from Queue import PriorityQueue, Empty
 from threading import Thread
 from time import sleep
 import datetime
@@ -31,7 +31,11 @@ def from_string(s):
     return dateutil.parser.parse(s)
 def from_unix_time(u):
     return datetime.datetime.fromtimestamp(u).replace(tzinfo=pytz.utc)
-now = lambda : datetime.datetime.utcnow().replace(tzinfo=pytz.utc)
+
+
+LOOK_AHEAD_TIME = datetime.timedelta(seconds=1000)
+CHUNK_LENGTH = datetime.timedelta(seconds=2000)
+SITE_URL= 'http://chain-api.media.mit.edu/sites/7'
 
 
 class Event:
@@ -63,43 +67,42 @@ def get_data(sensor, start_time, end_time):
     c = chainclient.get(sensor.data_url +'&timestamp__gte=%s&timestamp__lt=%s' % (start_stamp, end_stamp))
     return c.data
 
-SITE_URL= 'http://chain-api.media.mit.edu/sites/7'
+
 site = chainclient.get(SITE_URL)
 _, _, sensor_hash = get_models(site)
-
 sensors = sensor_hash.values()
+logger.info("Initialized")
 
-logger.info("Initialized!!!")
+
+class PseudoClock:
+    def start(self, start_time=1415491200, time_scale=1):
+        self.time_scale = time_scale
+        self.local_start_time = self.local_now()
+        self.pseudo_start_time = from_unix_time(start_time)
+
+    def local_now(self):
+        return datetime.datetime.utcnow().replace(tzinfo=pytz.utc)
+
+    def pseudo_now(self):
+        pseudo_elapsed_time = (self.local_now() - self.local_start_time) * self.time_scale
+        return self.pseudo_start_time + pseudo_elapsed_time
+
 
 @sockets.route('/')
 def send_socket(ws):
-    # arguments
-    unix_start_time = 1401926400
-
-    # parameters
-    TIME_SCALE = 10
-    LOOK_AHEAD_TIME = datetime.timedelta(seconds=1000)
-    CHUNK_LENGTH = datetime.timedelta(seconds=2000)
-
-    # initial conditions
-    LOCAL_START_TIME = now()
-    HISTORICAL_START_TIME = from_unix_time(unix_start_time)
-
-    def pseudo_current_time():
-        pseudo_elapsed_time = (now() - LOCAL_START_TIME) * TIME_SCALE
-        return HISTORICAL_START_TIME + pseudo_elapsed_time
-
-    logger.info("Connected to client for time %s" % HISTORICAL_START_TIME)
+    clock = PseudoClock()
+    clock.start(start_time=1415491200, time_scale=1)
+    logger.info("Connected to client for time %s" % clock.pseudo_start_time)
 
     # shared memory
     q = PriorityQueue()
 
     def look_ahead_loop():
-        highest_time_checked = HISTORICAL_START_TIME
+        highest_time_checked = clock.pseudo_start_time
         while True:
-            if pseudo_current_time() >= now():
+            if clock.pseudo_now() >= clock.local_now():
                 break
-            if pseudo_current_time() < highest_time_checked - LOOK_AHEAD_TIME:
+            if clock.pseudo_now() < highest_time_checked - LOOK_AHEAD_TIME:
                 sleep(0.1)
                 continue
             start = highest_time_checked
@@ -117,11 +120,23 @@ def send_socket(ws):
     t.daemon = True
     t.start()
 
+    def read_seek():
+        new_start_time = ws.receive()
+        while True:
+            try:
+                q.get(False)
+            except Empty:
+                clock.start(star_time=new_start_time, time_scale=1)
+
+    t2 = Thread(target=read_seek)
+    t2.daemon = True
+    t2.start()
+
     while True:
         key, event = q.get()
-        if pseudo_current_time() < event.time:
+        if clock.pseudo_now() < event.time:
             q.put((key, event))
-            sleep(0.1)
+            sleep(0.05)
         else:
             logger.info('Sending: %s' % json.dumps(event.to_dict()))
             ws.send(json.dumps(event.to_dict()))
