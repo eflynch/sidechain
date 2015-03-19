@@ -17,17 +17,23 @@ from models import get_models
 logger = logging.getLogger(__name__)
 coloredlogs.install(level=logging.INFO)
 
+
+# parameters
+SITE_URL= 'http://chain-api.media.mit.edu/sites/7'
+OSC_IN_PORT = 5553
+OSC_OUT_PORT = 5555
+OSC_UNITY_PORT = 5554
+
+outgoing_addr = liblo.Address(OSC_OUT_PORT)
+
 def main():
-    # parameters
-    SITE_URL= 'http://chain-api.media.mit.edu/sites/7'
-    OSC_IN_PORT = 5553
-    OSC_OUT_PORT = 5555
-
+    # Set up Chain Objects
     site = chainclient.get(SITE_URL)
-
     metric_hash, device_hash, sensor_hash = get_models(site)
 
-    def get_values_loop():
+
+    # Pass through websocket events from chainAPI
+    def get_ws_values_loop():
         if True:
             stream_url = 'ws://localhost:8000/'
         else:
@@ -44,17 +50,34 @@ def main():
             except KeyError:
                 logger.warning('Hash miss: %s' % in_data.links['ch:sensor'].href)
                 continue
-
-            logger.info('Received value of %f from sensor %s' % (in_data.value, sensor))
+            logger.debug('Received value of %f from sensor %s' % (in_data.value, sensor))
             sensor.value = in_data.value
-            osc_addr = liblo.Address(OSC_OUT_PORT)
-            liblo.send(osc_addr, '/device/data', sensor.device.index, sensor.metric, in_data.value)
-
-    t = Thread(target=get_values_loop)
+            liblo.send(outgoing_addr, '/device/data', sensor.device.index, sensor.metric, in_data.value)
+    t = Thread(target=get_ws_values_loop)
     t.daemon = True
     t.start()
 
-    # OSC Server
+
+    # OSC Server to pass through Unity player information
+    # /player/location x y z
+    # /player/angle yaw pitch roll
+    # /time seconds
+    def osc_pass_through_loop():
+        server = liblo.Server(OSC_UNITY_PORT)
+
+        def pass_through(path, args):
+            logger.info("Received data from Unity: %s : %s" % (path, args))
+            liblo.send(outgoing_addr, path, *args)
+
+        server.add_method(None, None, pass_through)
+        while True:
+            server.recv(100)
+    t2 = Thread(target=osc_pass_through_loop)
+    t2.daemon = True
+    t2.start()
+
+
+    # OSC Server to communicated with Music client
     try:
         server = liblo.Server(OSC_IN_PORT)
     except liblo.ServerError, err:
@@ -62,45 +85,39 @@ def main():
 
     def get_metric(path, args):
         metric_title, x, y = args
-        logger.info("Received request for %s at %s, %s" % (metric_title, x ,y))
+        logger.debug("Received request for %s at %s, %s" % (metric_title, x ,y))
         metric = metric_hash[metric_title]
-        osc_addr = liblo.Address(OSC_OUT_PORT)
         value = metric.get_value(x,y)
         if value != float('inf'):
-            liblo.send(osc_addr, '/metric/data', metric_title, value)
+            liblo.send(outgoing_addr, '/metric/data', metric_title, value)
         else:
             value = metric.get_mean()
-            liblo.send(osc_addr, '/metric/data', metric_title, value)
+            liblo.send(outgoing_addr, '/metric/data', metric_title, value)
             logger.warning("No data for %s at %s, %s. Sending mean instead" % (metric_title, x, y))
 
     def get_mean(path, args):
         (metric_title,) = args
-        logger.info("Received request for %s mean" % (metric_title))
+        logger.debug("Received request for %s mean" % (metric_title))
         metric = metric_hash[metric_title]
-        osc_addr = liblo.Address(OSC_OUT_PORT)
         value = metric.get_mean()
-        liblo.send(osc_addr, '/metric/mean/data', metric_title, value)
-
+        liblo.send(outgoing_addr, '/metric/mean/data', metric_title, value)
 
     def get_std(path, args):
         (metric_title,) = args
-        logger.info("Received request for %s std" % (metric_title))
+        logger.debug("Received request for %s std" % (metric_title))
         metric = metric_hash[metric_title]
-        osc_addr = liblo.Address(OSC_OUT_PORT)
         value = metric.get_std()
-        liblo.send(osc_addr, '/metric/std/data', metric_title, value)
+        liblo.send(outgoing_addr, '/metric/std/data', metric_title, value)
     
-
     def get_device(path, args):
         (index, ) = args
-        logger.info("Recevied request for device %s" % index)
-        osc_addr = liblo.Address(OSC_OUT_PORT)
+        logger.debug("Recevied request for device %s" % index)
         device = device_hash[index]
-        liblo.send(osc_addr, '/device/location', device.index, device.x, device.y)
+        liblo.send(outgoing_addr, '/device/location', device.index, device.x, device.y)
 
     def plot_heat(path, args):
         (metric_title, ) = args
-        logger.info("Received request to plot metric %s" % metric_title)
+        logger.debug("Received request to plot metric %s" % metric_title)
         metric = metric_hash[metric_title]
         plt.figure()
         metric.plot_sensors()
@@ -109,7 +126,7 @@ def main():
 
     def plot_scatter(path, args):
         (metric_title, ) = args
-        logger.info("Received request to plot metric %s" % metric_title)
+        logger.debug("Received request to plot metric %s" % metric_title)
         metric = metric_hash[metric_title]
         plt.figure()
         metric.plot_sensors()
@@ -118,7 +135,7 @@ def main():
 
     def plot_sensors(path, args):
         (metric_title, ) = args
-        logger.info("Received request to plot metric %s" % metric_title)
+        logger.debug("Received request to plot metric %s" % metric_title)
         metric = metric_hash[metric_title]
         plt.figure()
         metric.plot_sensors()

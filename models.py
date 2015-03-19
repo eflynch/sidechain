@@ -125,21 +125,32 @@ class Device(object):
         self.elevation = elevation
         self.index = index
 
+    # Affine Transform to match unity coordinates done in C#
+    # const float xScale = 83459.2085f;
+    # const float zScale = 109938.8055f;
+    # const float xOffset = 5890083.394f;
+    # const float zOffset = -4606524.694f;
+    # float sensorX = float.Parse(deviceJson["geoLocation"]["longitude"].ToString()) * xScale + xOffset;
+    # float sensorZ = float.Parse(deviceJson["geoLocation"]["latitude"].ToString()) * zScale + zOffset;
+    # float sensorY = (float)groundTerrain.SampleHeight(new Vector3(sensorX, 0, sensorZ)) + 0.7f;
     @property
     def x(self):
-        if self.latitude is None:
-            return 41.9034748
-        if self.latitude == 0.0:
-            return 41.9034748
-        return self.latitude
+        xScale = 83459.2085
+        xOffset = 5890083.394
 
+        if self.longitude is None or self.longitude == 0.0:
+            return 0.0
+        return self.longitude * xScale + xOffset
+
+    # Equivalent to Unity "Z" axis but we are doing 2D for now
     @property
     def y(self):
-        if self.longitude is None:
-            return -70.573021
-        if self.longitude == 0.0:
-            return -70.573021
-        return self.longitude
+        yScale = 109938.8055
+        yOffset = -4606524.694
+
+        if self.latitude is None or self.latitude == 0.0:
+            return 0.0
+        return self.latitude * yScale + yOffset
     
 
 class Sensor(object):

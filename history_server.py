@@ -1,6 +1,6 @@
 from Queue import PriorityQueue, Empty
 from threading import Thread
-from time import sleep
+from gevent import sleep
 import datetime
 import json
 
@@ -126,7 +126,7 @@ def send_socket(ws):
             try:
                 q.get(False)
             except Empty:
-                clock.start(star_time=new_start_time, time_scale=1)
+                clock.start(start_time=new_start_time, time_scale=1)
 
     t2 = Thread(target=read_seek)
     t2.daemon = True
